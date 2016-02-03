@@ -24,7 +24,15 @@ namespace sTranslate.TestApp
             // Check command syntax
             if (args.Length < 5)
             {
+                if (args.Length == 1 && args[0].ToLower() == "stresstest")
+                {
+                    StressTest.DoTest(@"C:\Dev\sTranslate\sTranslate.TestApp\StressTest.dat"); 
+                    return; 
+                }
+                
+                Console.WriteLine("Command syntax error!\n");
                 Console.WriteLine("Using: {0}.exe Context Property Criteria ToLang Text", myName);
+                Console.WriteLine("\nExample: {0}.exe string text contains no Add Service", myName);
                 return; 
             }
 
@@ -32,21 +40,23 @@ namespace sTranslate.TestApp
             string property = args[1];
             string criteria = args[2];
             string toLang = args[3];
-            string text = args[4];
+            string text = "";
+            for (int i = 4; i < args.Length; i++)
+                text += (text == "") ? args[i] : " " + args[i];
 
             try
             {
                 // Call translation an print output
                 string toText = Tools.XltTool.GetToText(EnumsXlt.ToCriteria(criteria), text, EnumsXlt.ToPropertyType(property), context, toLang);
-                Console.WriteLine("{0}: English: \"{1}\" translated to Norwegian: \"{2}\"", myName, text, toText);
+                Console.WriteLine("{0}: English: \"{1}\" translated to: \"{2}\"", myName, text, toText);
                 Console.WriteLine("{0}: Duration: {1}", myName, DateTime.Now.Subtract(startTime));
                 Console.WriteLine("Press any key to end ...");
-                Console.ReadKey(); 
             }
             catch (Exception ex)
             {
                 Console.WriteLine("Error: {0}", XltTool.ExceptionMsg(ex, true)); 
             }
+            Console.ReadKey();
         }
     }
 }

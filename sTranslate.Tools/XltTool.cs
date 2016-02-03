@@ -15,7 +15,7 @@ namespace sTranslate.Tools
     /// </summary>
     public class XltTool
     {
-        private static List<Model.Translation> _translateColl = null; 
+        private static List<sTranslate.Model.Translation> _translateColl = null;
         public static string FromLanguageCode = "en";
 
         /// <summary>
@@ -23,15 +23,15 @@ namespace sTranslate.Tools
         /// </summary>
         /// <param name="reRead">ReRead from database</param>
         /// <returns>Translation collection</returns>
-        public static List<Model.Translation> GetTranslations(bool reRead = false)
+        public static List<sTranslate.Model.Translation> GetTranslations(bool reRead = false)
         {
             if (_translateColl == null || reRead == true)
             {
-                using (var ctx = new Model.TranslationEntities())
+                using (var ctx = new sTranslate.Model.TranslationEntities())
                 {
                     _translateColl = (from xl in ctx.Translation select xl).ToList();
                     if (_translateColl == null)
-                        _translateColl = new List<Model.Translation>();
+                        _translateColl = new List<sTranslate.Model.Translation>();
                     return _translateColl;
                 }
             }
@@ -55,32 +55,30 @@ namespace sTranslate.Tools
             if (fromText.Trim() == "")
                 return "";
 
-            List<Model.Translation> coll = new List<Model.Translation>();
-            using (var ctx = new Model.TranslationEntities())
+            List<sTranslate.Model.Translation> coll = new List<sTranslate.Model.Translation>();
+            using (var ctx = new sTranslate.Model.TranslationEntities())
             {
-                if (string.IsNullOrEmpty(toLanguageCode)) 
+                if (string.IsNullOrEmpty(toLanguageCode))
                     toLanguageCode = "no";
 
                 // Do search by criteria
                 coll = (from xl in ctx.Translation
                         where xl.Criteria.ToLower() == criteria.ToString().ToLower() &&
-                              xl.FromLang == FromLanguageCode && 
-                              xl.FromText == fromText && 
+                              xl.FromLang == FromLanguageCode &&
+                              xl.FromText == fromText &&
                               xl.Property.ToLower() == property.ToString().ToLower() &&
                               xl.Context.ToLower() == context.ToLower() &&
                               xl.ToLang == toLanguageCode
                         select xl).ToList();
 
-                return (coll != null && coll.Count > 0) ? coll.First().ToText : fromText;  
+                return (coll != null && coll.Count > 0) ? coll.First().ToText : fromText;
             }
         }
 
         /// <summary>
         /// 
-        ///     ToText methode returen the translated string, if defined int the Translate table. 
-        ///     If the fromText is not found, the value of fromText is returned unchanged.
-        ///     Multiple definitions for the same source string can be registered, and in case, 
-        ///     the context and rowtype fields must be used to separate them.    
+        ///     ToText do the same as GetToText() methode, but use a cached collection to minimize DB read overhead.   
+        ///     Se GetToText for more information. 
         /// 
         /// </summary>
         /// <param name="fromText"> The string to be translated </param>
@@ -90,15 +88,16 @@ namespace sTranslate.Tools
         public static string ToText(EnumsXlt.Criterias criteria, string fromText, EnumsXlt.PropertyTypes property, string context, string toLanguageCode = "no")
         {
             if (fromText.Trim() == "")
-                return ""; 
+                return "";
 
-            GetTranslations();
+            // Get cached collection 
+            List<sTranslate.Model.Translation> translateColl = GetTranslations();
 
             if (string.IsNullOrEmpty(toLanguageCode))
                 toLanguageCode = "no";
 
             // Serach collection
-            foreach (Model.Translation xl in _translateColl)
+            foreach (sTranslate.Model.Translation xl in translateColl)
             {
                 if (xl.Criteria.ToLower() == criteria.ToString().ToLower() &&
                     xl.FromLang == FromLanguageCode &&
@@ -106,9 +105,9 @@ namespace sTranslate.Tools
                     xl.Property.ToLower() == property.ToString().ToLower() &&
                     xl.Context.ToLower() == context.ToLower() &&
                     xl.ToLang == toLanguageCode)
-                    return xl.ToText; 
+                    return xl.ToText;
             }
-            return fromText; 
+            return fromText;
         }
 
         public static string ToText(string fromText, EnumsXlt.PropertyTypes property, string context, string toLanguageCode = "no")
@@ -116,9 +115,9 @@ namespace sTranslate.Tools
             if (fromText.Trim() == "")
                 return "";
             string toText = fromText;
-            List<Model.Translation> coll;
+            List<sTranslate.Model.Translation> coll;
             coll = XltTool.GetXltByKeys(property, context, EnumsXlt.Criterias.None);
-            foreach (Model.Translation tr in coll)
+            foreach (sTranslate.Model.Translation tr in coll)
             {
                 switch (tr.Criteria.ToString().ToLower())
                 {
@@ -135,15 +134,21 @@ namespace sTranslate.Tools
                             toText = toText.Replace(tr.FromText, tr.ToText);
                         break;
                     case "contains":
-                        if (toText.ToLower().Contains(tr.FromText.ToLower()))
-                            toText = toText.Replace(tr.FromText, tr.ToText);
-                        break;
                     case "none":
-                        if (tr.FromText == "*")
+                        if (tr.Criteria.ToString().ToLower() == "none" && tr.FromText == "*")
                             toText = tr.ToText;
                         else
-                            if (toText.ToLower().Contains(tr.FromText.ToLower()))
+                        {
+                            // Contains word
+                            if (toText.ToLower().Contains(" " + tr.FromText.ToLower() + " "))
+                                toText = toText.Replace(" " + tr.FromText + " ", " " + tr.ToText + " ");
+                            else if (toText.ToLower().StartsWith(tr.FromText.ToLower() + " "))
+                                toText = toText.Replace(tr.FromText + " ", tr.ToText + " ");
+                            else if (toText.ToLower().EndsWith(" " + tr.FromText.ToLower()))
+                                toText = toText.Replace(" " + tr.FromText, " " + tr.ToText);
+                            else if (toText.ToLower() == tr.FromText.ToLower())
                                 toText = toText.Replace(tr.FromText, tr.ToText);
+                        }
                         break;
                     default:
                         // No translation
@@ -155,29 +160,44 @@ namespace sTranslate.Tools
         }
 
         /// <summary>
+        /// Translate text with defaults.
+        /// Note: For the last parameter Context, you can use EnumsXlt.Contexts.String.ToString() to avoid typeing missstakes. 
+        /// </summary>
+        /// <param name="sourceText">Source text</param>
+        /// <param name="propertyType">Property type</param>
+        /// <param name="criteria">Criteria</param>
+        /// <param name="context">Context</param>
+        /// <returns></returns>
+        public static string Xlt(string sourceText, EnumsXlt.PropertyTypes propertyType = EnumsXlt.PropertyTypes.Text, EnumsXlt.Criterias criteria = EnumsXlt.Criterias.Contains, string context = "String")
+        {
+            return XltTool.ToText(criteria, sourceText, propertyType, context);
+        }
+
+
+        /// <summary>
         /// Get Translation entity collection by keys 
         /// </summary>
         /// <param name="propertyType"></param>
         /// <param name="context"></param>
         /// <param name="toLanguageCode"></param>
         /// <returns></returns>
-        public static List<Model.Translation> GetTranslationByKeys(EnumsXlt.Criterias criteria, EnumsXlt.PropertyTypes property, string context = null, string toLanguageCode = "no")
+        public static List<sTranslate.Model.Translation> GetTranslationByKeys(EnumsXlt.Criterias criteria, EnumsXlt.PropertyTypes property, string context = null, string toLanguageCode = "no")
         {
-            List<Model.Translation> coll = new List<Model.Translation>();
-            using (var ctx = new Model.TranslationEntities())
+            List<sTranslate.Model.Translation> coll = new List<sTranslate.Model.Translation>();
+            using (var ctx = new sTranslate.Model.TranslationEntities())
             {
                 if (string.IsNullOrEmpty(toLanguageCode))
                     toLanguageCode = "no";
 
 
                 coll = (from xl in ctx.Translation
-                        where xl.FromLang == FromLanguageCode && xl.ToLang == toLanguageCode && 
-                              xl.Criteria.ToLower() == criteria.ToString().ToLower() &&  
-                              xl.Property.ToLower() == property.ToString().ToLower() && 
+                        where xl.FromLang == FromLanguageCode && xl.ToLang == toLanguageCode &&
+                              xl.Criteria.ToLower() == criteria.ToString().ToLower() &&
+                              xl.Property.ToLower() == property.ToString().ToLower() &&
                               (context == null || (context != null && xl.Context.ToLower() == context.ToLower()))
                         select xl).ToList();
 
-                return (coll != null) ? coll : new List<Model.Translation>();
+                return (coll != null) ? coll : new List<sTranslate.Model.Translation>();
             }
         }
 
@@ -189,20 +209,22 @@ namespace sTranslate.Tools
         /// <param name="context"></param>
         /// <param name="toLanguageCode"></param>
         /// <returns></returns>
-        public static List<Model.Translation> GetXltByKeys(EnumsXlt.PropertyTypes property, string context, EnumsXlt.Criterias criteria = EnumsXlt.Criterias.None, string toLanguageCode = "no")
+        public static List<sTranslate.Model.Translation> GetXltByKeys(EnumsXlt.PropertyTypes property, string context, EnumsXlt.Criterias criteria = EnumsXlt.Criterias.None, string toLanguageCode = "no")
         {
-            List<Model.Translation> newColl = new List<Model.Translation>();
+            List<sTranslate.Model.Translation> newColl = new List<sTranslate.Model.Translation>();
             if (context == null)
-                return newColl; 
+                return newColl;
 
-            GetTranslations(); 
-            using (var ctx = new Model.TranslationEntities())
+            // Get cached collection 
+            List<sTranslate.Model.Translation> translateColl = GetTranslations();
+
+            using (var ctx = new sTranslate.Model.TranslationEntities())
             {
                 if (string.IsNullOrEmpty(toLanguageCode))
                     toLanguageCode = "no";
 
                 // Serach matching entities
-                foreach (Model.Translation xl in _translateColl)
+                foreach (sTranslate.Model.Translation xl in translateColl)
                 {
                     if (((criteria == EnumsXlt.Criterias.None) || (criteria != EnumsXlt.Criterias.None && xl.Criteria.ToLower() == criteria.ToString().ToLower())) &&
                         xl.FromLang == FromLanguageCode &&
@@ -223,7 +245,7 @@ namespace sTranslate.Tools
         /// <param name="text"></param>
         /// <param name="tr"></param>
         /// <returns></returns>
-        public static bool IsCriteriaMet(string text, Model.Translation tr)
+        public static bool IsCriteriaMet(string text, sTranslate.Model.Translation tr)
         {
             // string[] arr = Tool.RxReplace(c.Text, "(<.*?>)|([\n]+)|(&nbsp;)", "").Split(new string[] { "\r", ":", "  " }, StringSplitOptions.RemoveEmptyEntries);
             switch (EnumsXlt.ToCriteria(tr.Criteria))
@@ -271,11 +293,12 @@ namespace sTranslate.Tools
                 string msg = "";
                 while (e != null)
                 {
-                    msg += (msg != "") ? ";" + e.Message : e.Message; 
+                    msg += (msg != "") ? ";" + e.Message : e.Message;
                     e = e.InnerException;
                 }
                 return msg;
             }
         }
+
     }
 }
